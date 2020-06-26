@@ -73,8 +73,7 @@ impl Env {
         start_time_us: u64,
         start_time_cpu_us: u64,
     ) -> Result<Self> {
-        // All arguments are either mandatory, or have default values, so the unwraps
-        // should not fail.
+        // Mandatory arguments or with default values, unwraps should not fail.
         let id = arguments
             .value_as_string("id")
             .ok_or_else(|| Error::ArgumentParsing(MissingValue("id".to_string())))?;
@@ -129,6 +128,23 @@ impl Env {
         let netns = arguments.value_as_string("netns");
 
         let daemonize = arguments.value_as_bool("daemonize").unwrap_or(false);
+
+        // Optional arguments.
+        let cgroups = match arguments.value_as_string("cgroups") {
+            Some(cgroups_str) => {
+                cgroups_str
+                    .split(",")
+                    .map(|cgroup| {
+                        let aux = cgroup.split("=").collect::<Vec<&str>>();
+                        if aux.len() != 2 {
+                            panic!("Invalid format for cgroups parameter.")
+                        }
+                        Cgroup::new(aux[0].to_string(),aux[1].to_string())
+                    })
+                    .collect()
+            },
+            None => Vec::new()
+        };
 
         Ok(Env {
             id,
@@ -262,7 +278,8 @@ impl Env {
         }
 
         // We have to setup cgroups at this point, because we can't do it anymore after chrooting.
-        let cgroup = Cgroup::new(self.id.as_str(), self.numa_node, &exec_file_name)?;
+        // TODO get cgroups list and execute corresponding action for each cgroup
+        let cgroup = Cgroup::new("".to_string(), "".to_string());
         cgroup.attach_pid()?;
 
         // If daemonization was requested, open /dev/null before chrooting.

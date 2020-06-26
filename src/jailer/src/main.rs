@@ -272,6 +272,13 @@ pub fn build_arg_parser() -> ArgParser<'static> {
                 .takes_value(true)
                 .help("Arguments that will be passed verbatim to the exec file."),
         )
+        .arg(
+            Argument::new("cgroups")
+                .takes_value(true)
+                .help("Comma separated list with cgroups and values that needs to be \
+                    set following this format: <cgroup_file>=<value> \
+                    (e.g cpu.shares=10).")
+        )
 }
 
 fn sanitize_process() {

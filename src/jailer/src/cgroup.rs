@@ -26,7 +26,8 @@ const PROC_MOUNTS: &str = "/proc/mounts";
 const NODE_TO_CPULIST: &str = "/sys/devices/system/node/node";
 
 pub struct Cgroup {
-    tasks_files: Vec<PathBuf>,
+    file: String,
+    value: String,
 }
 
 // It's called writeln_special because we have to use this rather convoluted way of writing
@@ -126,7 +127,8 @@ fn inherit_from_parent(path: &mut PathBuf, file_name: &str) -> Result<()> {
 }
 
 impl Cgroup {
-    pub fn new(id: &str, numa_node: u32, exec_file_name: &OsStr) -> Result<Self> {
+    // TODO: this function should be esplited in multiple one (e.g write cgroup, get_path...)
+    pub fn new_old(id: &str, numa_node: u32, exec_file_name: &OsStr) -> Result<Self> {
         let f =
             File::open(PROC_MOUNTS).map_err(|e| Error::FileOpen(PathBuf::from(PROC_MOUNTS), e))?;
 
@@ -222,16 +224,21 @@ impl Cgroup {
             }
         }
 
-        Ok(Cgroup { tasks_files })
+        Ok(Cgroup { file: "".to_string(), value: "".to_string() })
+    }
+
+    pub fn new(file: String, value: String) -> Self {
+        Cgroup { file: file.to_string(), value: value.to_string() }
     }
 
     // This writes the pid of the current process to each tasks file. These are special files that,
     // when written to, will assign the process associated with the pid to the respective cgroup.
     pub fn attach_pid(&self) -> Result<()> {
         let pid = process::id();
-        for tasks_file in &self.tasks_files {
-            writeln_special(tasks_file, pid)?;
-        }
+        // TODO use new Cgroup interface1
+        //for tasks_file in &self.tasks_files {
+        //    writeln_special(tasks_file, pid)?;
+        //}
         Ok(())
     }
 }
