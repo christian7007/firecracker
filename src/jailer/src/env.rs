@@ -65,6 +65,7 @@ pub struct Env {
     start_time_us: u64,
     start_time_cpu_us: u64,
     extra_args: Vec<String>,
+    cgroups: Vec<Cgroup>,
 }
 
 impl Env {
@@ -97,6 +98,10 @@ impl Env {
             return Err(Error::NotAFile(exec_file_path));
         }
 
+        let exec_file_name = exec_file_path
+            .file_name()
+            .ok_or_else(|| Error::FileName(exec_file_path.clone()))?;
+
         let chroot_base = arguments
             .value_as_string("chroot-base-dir")
             .ok_or_else(|| Error::ArgumentParsing(MissingValue("chroot-base-dir".to_string())))?;
@@ -107,11 +112,7 @@ impl Env {
             return Err(Error::NotADirectory(chroot_dir));
         }
 
-        chroot_dir.push(
-            exec_file_path
-                .file_name()
-                .ok_or_else(|| Error::FileName(exec_file_path.clone()))?,
-        );
+        chroot_dir.push(&exec_file_name);
         chroot_dir.push(&id);
         chroot_dir.push("root");
 
@@ -130,16 +131,23 @@ impl Env {
         let daemonize = arguments.value_as_bool("daemonize").unwrap_or(false);
 
         // Optional arguments.
+
+        // cgroup format: <cgroup_controller>.<cgroup_property>=<value>,...
         let cgroups = match arguments.value_as_string("cgroups") {
             Some(cgroups_str) => {
                 cgroups_str
                     .split(",")
                     .map(|cgroup| {
-                        let aux = cgroup.split("=").collect::<Vec<&str>>();
+                        let aux: Vec<&str> = cgroup.split("=").collect();
                         if aux.len() != 2 {
-                            panic!("Invalid format for cgroups parameter.")
+                            panic!(format!("Invalid format for cgroups parameter: {}", cgroup))
                         }
-                        Cgroup::new(aux[0].to_string(),aux[1].to_string())
+
+                        // Panic if cgroup parsing fails
+                        Cgroup::new(aux[0].to_string(), // cgroup file
+                                    aux[1].to_string(), // cgroup value
+                                    &id,
+                                    &exec_file_name).unwrap()
                     })
                     .collect()
             },
@@ -158,6 +166,7 @@ impl Env {
             start_time_us,
             start_time_cpu_us,
             extra_args: arguments.extra_args(),
+            cgroups,
         })
     }
 
@@ -278,9 +287,17 @@ impl Env {
         }
 
         // We have to setup cgroups at this point, because we can't do it anymore after chrooting.
-        // TODO get cgroups list and execute corresponding action for each cgroup
-        let cgroup = Cgroup::new("".to_string(), "".to_string());
-        cgroup.attach_pid()?;
+        // cgroups are iterated two times at some cgroups may required others (e.g cpuset reuquires
+        // cpuset.mems and cpuset.cpus) to be set before attaching any pid.
+        for cgroup in &self.cgroups {
+            // it will panic if any cgroup fails to write
+            cgroup.write_value().unwrap();
+        }
+
+        for cgroup in &self.cgroups {
+            // it will panic if any cgroup fails to attach
+            cgroup.attach_pid().unwrap();
+        }
 
         // If daemonization was requested, open /dev/null before chrooting.
         let dev_null = if self.daemonize {

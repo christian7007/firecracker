@@ -29,7 +29,8 @@ pub enum Error {
     Canonicalize(PathBuf, io::Error),
     CgroupInheritFromParent(PathBuf, String),
     CgroupLineNotFound(String, String),
-    CgroupLineNotUnique(String, String),
+    CgroupInvalidFile(String),
+    CgroupWrite(String, String, String),
     ChangeFileOwner(PathBuf, io::Error),
     ChdirNewRoot(io::Error),
     Chmod(PathBuf, io::Error),
@@ -100,10 +101,13 @@ impl fmt::Display for Error {
                 "{} configurations not found in {}",
                 controller, proc_mounts
             ),
-            CgroupLineNotUnique(ref proc_mounts, ref controller) => write!(
+            CgroupInvalidFile(ref file) => write!(f, "Cgroup invalid file: {}", file,),
+            CgroupWrite(ref evalue, ref rvalue, ref file) => write!(
                 f,
-                "Found more than one cgroups configuration line in {} for {}",
-                proc_mounts, controller
+                "Expected value {} for {}. Current value: {}",
+                evalue,
+                file,
+                rvalue
             ),
             ChangeFileOwner(ref path, ref err) => {
                 write!(f, "Failed to change owner for {:?}: {}", path, err)

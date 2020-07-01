@@ -1,7 +1,6 @@
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -12,22 +11,12 @@ use regex::Regex;
 
 use super::{Error, Result};
 
-const CONTROLLER_CPU: &str = "cpu";
-
-const CONTROLLER_CPUSET: &str = "cpuset";
-const CPUSET_CPUS: &str = "cpuset.cpus";
-const CPUSET_MEMS: &str = "cpuset.mems";
-
-const CONTROLLER_PIDS: &str = "pids";
-
-// The list of cgroup controllers we're interested in.
-const CONTROLLERS: [&str; 3] = [CONTROLLER_CPU, CONTROLLER_CPUSET, CONTROLLER_PIDS];
 const PROC_MOUNTS: &str = "/proc/mounts";
-const NODE_TO_CPULIST: &str = "/sys/devices/system/node/node";
 
 pub struct Cgroup {
-    file: String,
-    value: String,
+    file: String,      // file representing the cgroup (e.g cpuset.mems).
+    value: String,     // value that will be write into the file.
+    location: PathBuf, // cgroup path where file while be set.
 }
 
 // It's called writeln_special because we have to use this rather convoluted way of writing
@@ -127,13 +116,70 @@ fn inherit_from_parent(path: &mut PathBuf, file_name: &str) -> Result<()> {
 }
 
 impl Cgroup {
-    // TODO: this function should be esplited in multiple one (e.g write cgroup, get_path...)
-    pub fn new_old(id: &str, numa_node: u32, exec_file_name: &OsStr) -> Result<Self> {
+    pub fn new(file: String, value: String, id: &str, exec_file_name: &OsStr) -> Result<Self> {
+        let cgroup_location = Self::get_location(&file, exec_file_name, id)?;
+
+        Ok(Cgroup { file: file,
+            value: value,
+            location: cgroup_location })
+    }
+
+    // This writes the cgroup value into the cgroup property file and attach the pid to the cgroup
+    pub fn write_value(&self) -> Result<()> {
+        let location = &mut self.location.clone();
+
+        // Creates the cgroup directory for the controller
+        fs::create_dir_all(&self.location).map_err(|e| Error::CreateDir(self.location.clone(), e))?;
+
+        // Writes the corresponding cgroup value. inherit_from_parent is used to
+        // correcly propagate the value if not defined
+        inherit_from_parent(location, &self.file)?;
+        location.push(&self.file);
+        writeln_special(location, &self.value)?;
+
+        // Ensure the value have been correctly written
+        let read_val = readln_special(location)?.trim().to_string();
+        if self.value !=  read_val{
+            return Err(Error::CgroupWrite(
+                        self.value.to_string(),
+                        read_val.to_string(),
+                        self.file.to_string(),
+                   ));
+        }
+
+        Ok(())
+    }
+
+    // This writes the pid of the current process to the tasks file. Tasks files are special files,
+    // that when written to, will assign the process associated with the pid to the respective cgroup.
+    pub fn attach_pid(&self) -> Result<()> {
+        let pid = process::id();
+        let location = &self.location.join("tasks");
+
+        writeln_special(location, pid)?;
+
+        Ok(())
+    }
+
+    // This extract the controller name from the cgroup file. The cgroup file must follow
+    // this format: <cgroup_controller>.<cgroup_property>.
+    fn get_controller(file: &str) -> Result<&str> {
+        let v: Vec<&str> = file.split(".").collect();
+
+        // Check format <cgroup_controller>.<cgroup_property>
+        if v.len() != 2 {
+            return Err(Error::CgroupInvalidFile(file.to_string()));
+        }
+
+        Ok(v[0])
+    }
+
+    // This returns the path of the cgroup subfolder for a specific controller
+    // (<mountpoint>/<controller>/<exec_file_name>/<id>).
+    fn get_location(file: &str, exec_file_name: &OsStr, id: &str) -> Result<PathBuf> {
+        let controller = Self::get_controller(file)?;
         let f =
             File::open(PROC_MOUNTS).map_err(|e| Error::FileOpen(PathBuf::from(PROC_MOUNTS), e))?;
-
-        let mut found_controllers: HashMap<&'static str, PathBuf> =
-            HashMap::with_capacity(CONTROLLERS.len());
 
         // Regex courtesy of Filippo.
         let re = Regex::new(
@@ -142,104 +188,22 @@ impl Cgroup {
         for l in BufReader::new(f).lines() {
             let l = l.map_err(|e| Error::ReadLine(PathBuf::from(PROC_MOUNTS), e))?;
             if let Some(capture) = re.captures(&l) {
-                // We could do the search in a more efficient manner but eh.
                 let v: Vec<&str> = capture["options"].split(',').collect();
 
-                for controller in CONTROLLERS.iter() {
-                    if v.contains(controller)
-                        && found_controllers
-                            .insert(controller, PathBuf::from(&capture["dir"]))
-                            .is_some()
-                    {
-                        return Err(Error::CgroupLineNotUnique(
-                            PROC_MOUNTS.to_string(),
-                            (*controller).to_string(),
-                        ));
-                    }
+                if v.contains(&controller) {
+                    let mut path = PathBuf::from(&capture["dir"]);
+                    path.push(exec_file_name);
+                    path.push(id);
+
+                    return Ok(path);
                 }
             }
         }
 
-        let found_controllers_len = found_controllers.len();
-
-        if found_controllers_len < CONTROLLERS.len() {
-            // We return an error about the first one we didn't find.
-            for controller in CONTROLLERS.iter() {
-                if !found_controllers.contains_key(controller) {
-                    return Err(Error::CgroupLineNotFound(
-                        PROC_MOUNTS.to_string(),
-                        (*controller).to_string(),
-                    ));
-                }
-            }
-        }
-
-        // This is just a sanity check.
-        assert_eq!(found_controllers_len, CONTROLLERS.len());
-
-        // We now both create the cgroup subfolders, and fill the tasks_files vector.
-        let mut tasks_files = Vec::with_capacity(found_controllers_len);
-
-        for (controller, mut path_buf) in found_controllers.drain() {
-            path_buf.push(exec_file_name);
-            path_buf.push(id);
-
-            fs::create_dir_all(&path_buf).map_err(|e| Error::CreateDir(path_buf.clone(), e))?;
-
-            // For now, the jailer is only populating configuration values for the cpuset
-            // controller, related to the cpu cores we are allowed to run on, and the numa node we
-            // want to restrict to. The jailer only creates the folder hierarchy for other cgroups,
-            // and the customer has to provide any desired configuration explicitly (if any).
-
-            if controller == CONTROLLER_CPUSET {
-                inherit_from_parent(&mut path_buf, CPUSET_CPUS)?;
-
-                // TODO: this does make an unnecessary write, as we change the value of the
-                // "cpuset.mems" file again at the end of the for block. Maybe fix this sometime.
-                inherit_from_parent(&mut path_buf, CPUSET_MEMS)?;
-
-                // Enforce NUMA node restriction.
-                // The cpuset subsystem assigns individual CPUs and memory nodes to cgroups.
-                // CPUSET_MEMS specifies the memory nodes that tasks in this cgroup are permitted to
-                // access.
-                path_buf.push(CPUSET_MEMS);
-                writeln_special(&path_buf, numa_node)?;
-                path_buf.pop();
-                // Similar to how numactl library does, we are copying the contents of
-                // /sys/devices/system/node/nodeX/cpulist to the cpuset.cpus file for ensuring
-                // correct numa cpu assignment.
-                let line = readln_special(&PathBuf::from(format!(
-                    "{}{}/cpulist",
-                    NODE_TO_CPULIST, numa_node
-                )))?;
-                path_buf.push(CPUSET_CPUS);
-                writeln_special(&path_buf, line)?;
-                path_buf.pop();
-            }
-
-            // And now add "tasks" to get the path of the corresponding tasks file.
-            path_buf.push("tasks");
-            if !tasks_files.contains(&path_buf) {
-                tasks_files.push(path_buf);
-            }
-        }
-
-        Ok(Cgroup { file: "".to_string(), value: "".to_string() })
-    }
-
-    pub fn new(file: String, value: String) -> Self {
-        Cgroup { file: file.to_string(), value: value.to_string() }
-    }
-
-    // This writes the pid of the current process to each tasks file. These are special files that,
-    // when written to, will assign the process associated with the pid to the respective cgroup.
-    pub fn attach_pid(&self) -> Result<()> {
-        let pid = process::id();
-        // TODO use new Cgroup interface1
-        //for tasks_file in &self.tasks_files {
-        //    writeln_special(tasks_file, pid)?;
-        //}
-        Ok(())
+        Err(Error::CgroupLineNotFound(
+            PROC_MOUNTS.to_string(),
+            controller.to_string(),
+        ))
     }
 }
 
