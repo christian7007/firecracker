@@ -119,9 +119,11 @@ impl Cgroup {
     pub fn new(file: String, value: String, id: &str, exec_file_name: &OsStr) -> Result<Self> {
         let cgroup_location = Self::get_location(&file, exec_file_name, id)?;
 
-        Ok(Cgroup { file: file,
-            value: value,
-            location: cgroup_location })
+        Ok(Cgroup {
+            file,
+            value,
+            location: cgroup_location,
+        })
     }
 
     // This writes the cgroup value into the cgroup property file and attach the pid to the cgroup
@@ -129,7 +131,8 @@ impl Cgroup {
         let location = &mut self.location.clone();
 
         // Creates the cgroup directory for the controller
-        fs::create_dir_all(&self.location).map_err(|e| Error::CreateDir(self.location.clone(), e))?;
+        fs::create_dir_all(&self.location)
+            .map_err(|e| Error::CreateDir(self.location.clone(), e))?;
 
         // Writes the corresponding cgroup value. inherit_from_parent is used to
         // correcly propagate the value if not defined
@@ -139,12 +142,12 @@ impl Cgroup {
 
         // Ensure the value have been correctly written
         let read_val = readln_special(location)?.trim().to_string();
-        if self.value !=  read_val{
+        if self.value != read_val {
             return Err(Error::CgroupWrite(
-                        self.value.to_string(),
-                        read_val.to_string(),
-                        self.file.to_string(),
-                   ));
+                self.value.to_string(),
+                read_val,
+                self.file.to_string(),
+            ));
         }
 
         Ok(())
@@ -164,7 +167,7 @@ impl Cgroup {
     // This extract the controller name from the cgroup file. The cgroup file must follow
     // this format: <cgroup_controller>.<cgroup_property>.
     fn get_controller(file: &str) -> Result<&str> {
-        let v: Vec<&str> = file.split(".").collect();
+        let v: Vec<&str> = file.split('.').collect();
 
         // Check format <cgroup_controller>.<cgroup_property>
         if v.len() != 2 {

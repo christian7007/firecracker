@@ -128,22 +128,25 @@ impl Env {
         let cgroups = match arguments.value_as_string("cgroups") {
             Some(cgroups_str) => {
                 cgroups_str
-                    .split(",")
+                    .split(',')
                     .map(|cgroup| {
-                        let aux: Vec<&str> = cgroup.split("=").collect();
+                        let aux: Vec<&str> = cgroup.split('=').collect();
                         if aux.len() != 2 {
                             panic!(format!("Invalid format for cgroups parameter: {}", cgroup))
                         }
 
                         // Panic if cgroup parsing fails
-                        Cgroup::new(aux[0].to_string(), // cgroup file
-                                    aux[1].to_string(), // cgroup value
-                                    &id,
-                                    &exec_file_name).unwrap()
+                        Cgroup::new(
+                            aux[0].to_string(), // cgroup file
+                            aux[1].to_string(), // cgroup value
+                            &id,
+                            &exec_file_name,
+                        )
+                        .unwrap()
                     })
                     .collect()
-            },
-            None => Vec::new()
+            }
+            None => Vec::new(),
         };
 
         Ok(Env {

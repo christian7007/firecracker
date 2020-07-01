@@ -105,9 +105,7 @@ impl fmt::Display for Error {
             CgroupWrite(ref evalue, ref rvalue, ref file) => write!(
                 f,
                 "Expected value {} for {}. Current value: {}",
-                evalue,
-                file,
-                rvalue
+                evalue, file, rvalue
             ),
             ChangeFileOwner(ref path, ref err) => {
                 write!(f, "Failed to change owner for {:?}: {}", path, err)
@@ -270,13 +268,11 @@ pub fn build_arg_parser() -> ArgParser<'static> {
                 .takes_value(true)
                 .help("Arguments that will be passed verbatim to the exec file."),
         )
-        .arg(
-            Argument::new("cgroups")
-                .takes_value(true)
-                .help("Comma separated list with cgroups and values that needs to be \
+        .arg(Argument::new("cgroups").takes_value(true).help(
+            "Comma separated list with cgroups and values that needs to be \
                     set following this format: <cgroup_file>=<value> \
-                    (e.g cpu.shares=10).")
-        )
+                    (e.g cpu.shares=10).",
+        ))
 }
 
 fn sanitize_process() {
@@ -436,13 +432,6 @@ mod tests {
                 Error::CgroupLineNotFound(proc_mounts.to_string(), controller.to_string())
             ),
             "sysfs configurations not found in /proc/mounts",
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                Error::CgroupLineNotUnique(proc_mounts.to_string(), controller.to_string())
-            ),
-            "Found more than one cgroups configuration line in /proc/mounts for sysfs",
         );
 
         assert_eq!(
