@@ -239,12 +239,6 @@ pub fn build_arg_parser() -> ArgParser<'static> {
                 .help("File path to exec into."),
         )
         .arg(
-            Argument::new("node")
-                .required(true)
-                .takes_value(true)
-                .help("NUMA node to assign this microVM to."),
-        )
-        .arg(
             Argument::new("uid")
                 .required(true)
                 .takes_value(true)

@@ -55,7 +55,6 @@ fn dup2(old_fd: libc::c_int, new_fd: libc::c_int) -> Result<()> {
 
 pub struct Env {
     id: String,
-    numa_node: u32,
     chroot_dir: PathBuf,
     exec_file_path: PathBuf,
     uid: u32,
@@ -80,13 +79,6 @@ impl Env {
             .ok_or_else(|| Error::ArgumentParsing(MissingValue("id".to_string())))?;
 
         validators::validate_instance_id(&id.as_str()).map_err(Error::InvalidInstanceId)?;
-
-        let numa_node_str = arguments
-            .value_as_string("node")
-            .ok_or_else(|| Error::ArgumentParsing(MissingValue("node".to_string())))?;
-        let numa_node = numa_node_str
-            .parse::<u32>()
-            .map_err(|_| Error::NumaNode(numa_node_str))?;
 
         let exec_file = arguments
             .value_as_string("exec-file")
@@ -156,7 +148,6 @@ impl Env {
 
         Ok(Env {
             id,
-            numa_node,
             chroot_dir,
             exec_file_path,
             uid,
