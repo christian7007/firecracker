@@ -4,6 +4,8 @@
 import os
 import stat
 
+from framework.defs import FC_BINARY_NAME
+
 # These are the permissions that all files/dirs inside the jailer have.
 REG_PERMS = stat.S_IRUSR | stat.S_IWUSR | \
             stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP | \
@@ -92,3 +94,25 @@ def test_arbitrary_usocket_location(test_microvm_with_initrd):
     check_stats(os.path.join(test_microvm.jailer.chroot_path(),
                              "api.socket"), SOCK_STATS,
                 test_microvm.jailer.uid, test_microvm.jailer.gid)
+
+
+def test_cgroups(test_microvm_with_initrd):
+    """Test the cgroups are correctly set by the jailer."""
+    test_microvm = test_microvm_with_initrd
+    test_microvm.jailer.cgroups = 'cpuset.mems=0,cpuset.cpus=0,cpu.shares=2'
+
+    test_microvm.spawn()
+
+    for cgroup in test_microvm.jailer.cgroups.split(','):
+        controller = cgroup.split('.')[0]
+        file_name, value = cgroup.split('=')
+        location = '/sys/fs/cgroup/{}/{}/{}/'.format(
+            controller,
+            FC_BINARY_NAME,
+            test_microvm.jailer.jailer_id
+        )
+        tasks_file = location + 'tasks'
+        file = location + file_name
+
+        assert open(file, 'r').readline().strip() == value
+        assert open(tasks_file, 'r').readline().strip().isdigit()

@@ -26,7 +26,6 @@ class JailerContext:
     # Keep in sync with parameters from code base.
     jailer_id = None
     exec_file = None
-    numa_node = None
     uid = None
     gid = None
     chroot_base = None
@@ -34,17 +33,18 @@ class JailerContext:
     daemonize = None
     extra_args = None
     api_socket_name = None
+    cgroups = None
 
     def __init__(
             self,
             jailer_id,
             exec_file,
-            numa_node=0,
             uid=1234,
             gid=1234,
             chroot_base=DEFAULT_CHROOT_PATH,
             netns=None,
             daemonize=True,
+            cgroups='cpuset.mems=0,cpuset.cpus=0',
             **extra_args
     ):
         """Set up jailer fields.
@@ -55,7 +55,6 @@ class JailerContext:
         """
         self.jailer_id = jailer_id
         self.exec_file = exec_file
-        self.numa_node = numa_node
         self.uid = uid
         self.gid = gid
         self.chroot_base = chroot_base
@@ -63,6 +62,7 @@ class JailerContext:
         self.daemonize = daemonize
         self.extra_args = extra_args
         self.api_socket_name = DEFAULT_USOCKET_NAME
+        self.cgroups = cgroups
 
     def __del__(self):
         """Cleanup this jailer context."""
@@ -82,8 +82,6 @@ class JailerContext:
             jailer_param_list.extend(['--id', str(self.jailer_id)])
         if self.exec_file is not None:
             jailer_param_list.extend(['--exec-file', str(self.exec_file)])
-        if self.numa_node is not None:
-            jailer_param_list.extend(['--node', str(self.numa_node)])
         if self.uid is not None:
             jailer_param_list.extend(['--uid', str(self.uid)])
         if self.gid is not None:
@@ -96,6 +94,8 @@ class JailerContext:
             jailer_param_list.extend(['--netns', str(self.netns_file_path())])
         if self.daemonize:
             jailer_param_list.append('--daemonize')
+        if self.cgroups is not None:
+            jailer_param_list.extend(['--cgroups', str(self.cgroups)])
         # applying neccessory extra args if needed
         if len(self.extra_args) > 0:
             jailer_param_list.append('--')
@@ -194,7 +194,10 @@ class JailerContext:
         # microVM.
 
         # Firecracker is interested in these 3 cgroups for the moment.
-        controllers = ('cpu', 'cpuset', 'pids')
+        controllers = set()
+        for cgroup in self.cgroups.split(','):
+            controllers.add(cgroup.split('=')[0].split('.')[0])
+
         for controller in controllers:
             # Obtain the tasks from each cgroup and wait on them before
             # removing the microvm's associated cgroup folder.

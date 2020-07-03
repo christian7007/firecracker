@@ -377,7 +377,6 @@ mod tests {
 
     #[derive(Clone)]
     struct ArgVals<'a> {
-        pub node: &'a str,
         pub id: &'a str,
         pub exec_file: &'a str,
         pub uid: &'a str,
@@ -385,12 +384,12 @@ mod tests {
         pub chroot_base: &'a str,
         pub netns: Option<&'a str>,
         pub daemonize: bool,
+        pub cgroups: &'a str,
     }
 
     impl ArgVals<'_> {
         pub fn new() -> ArgVals<'static> {
             ArgVals {
-                node: "1",
                 id: "bd65600d-8669-4903-8a14-af88203add38",
                 exec_file: "/proc/cpuinfo",
                 uid: "1001",
@@ -398,6 +397,7 @@ mod tests {
                 chroot_base: "/",
                 netns: Some("zzzns"),
                 daemonize: true,
+                cgroups: "cpu.shares=2",
             }
         }
     }
@@ -405,8 +405,6 @@ mod tests {
     fn make_args(arg_vals: &ArgVals) -> Vec<String> {
         let mut arg_vec = vec![
             "--binary-name",
-            "--node",
-            arg_vals.node,
             "--id",
             arg_vals.id,
             "--exec-file",
@@ -417,6 +415,8 @@ mod tests {
             arg_vals.gid,
             "--chroot-base-dir",
             arg_vals.chroot_base,
+            "--cgroups",
+            arg_vals.cgroups,
         ]
         .into_iter()
         .map(String::from)
@@ -473,16 +473,6 @@ mod tests {
             daemonize: true,
             ..another_good_arg_vals.clone()
         };
-
-        let invalid_node_arg_vals = ArgVals {
-            node: "zzz",
-            ..base_invalid_arg_vals.clone()
-        };
-
-        let arg_parser = build_arg_parser();
-        args = arg_parser.arguments().clone();
-        args.parse(&make_args(&invalid_node_arg_vals)).unwrap();
-        assert!(Env::new(&args, 0, 0).is_err());
 
         let invalid_id_arg_vals = ArgVals {
             id: "/ad./sa12",
@@ -671,7 +661,6 @@ mod tests {
         let some_dir_path = some_dir.as_path().to_str().unwrap();
 
         let some_arg_vals = ArgVals {
-            node: "1",
             id: "bd65600d-8669-4903-8a14-af88203add38",
             exec_file: some_file_path,
             uid: "1001",
@@ -679,6 +668,7 @@ mod tests {
             chroot_base: some_dir_path,
             netns: Some("zzzns"),
             daemonize: false,
+            cgroups: "cpu.shares=2",
         };
         fs::write(some_file_path, "some_content").unwrap();
         args.parse(&make_args(&some_arg_vals)).unwrap();
